@@ -3,21 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI 国际象棋教练 - 手机版</title>
+    <title>AI 国际象棋教练 - 完整版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <style>
-        :root { --bg: #262421; --accent: #81b64c; --panel: #312e2b; }
+        :root { --bg: #262421; --accent: #81b64c; --panel: #312e2b; --danger: #fa412d; }
         body { background: var(--bg); color: #fff; font-family: sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow-x: hidden; }
         
-        /* 响应式容器 */
         .container { display: flex; flex-direction: column; width: 100%; max-width: 600px; padding: 10px; box-sizing: border-box; align-items: center; gap: 15px; }
-        
-        @media (min-width: 800px) {
-            .container { flex-direction: row; max-width: 900px; padding: 25px; }
-        }
+        @media (min-width: 800px) { .container { flex-direction: row; max-width: 900px; padding: 25px; } }
 
         .board-wrapper { position: relative; display: flex; gap: 10px; }
-        
         .eval-bar-box { width: 12px; height: 100%; background: #403d39; border-radius: 2px; position: relative; overflow: hidden; }
         #eval-progress { position: absolute; bottom: 0; width: 100%; height: 50%; background: #fff; transition: height 0.8s ease; }
 
@@ -28,10 +23,13 @@
         
         .move-grade { font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
         .grade-best { background: #81b64c; color: white; }
-        .grade-bad { background: #fa412d; color: white; }
+        .grade-bad { background: var(--danger); color: white; }
 
-        select, button { width: 100%; padding: 14px; border: none; border-radius: 8px; background: #45423e; color: white; cursor: pointer; font-weight: bold; font-size: 16px; }
-        button:active { background: var(--accent); transform: scale(0.98); }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+        select, button { width: 100%; padding: 14px; border: none; border-radius: 8px; background: #45423e; color: white; cursor: pointer; font-weight: bold; font-size: 16px; transition: 0.2s; }
+        button:active { transform: scale(0.95); opacity: 0.8; }
+        .btn-undo { background: #56534e; }
+        .btn-reset { background: #45423e; }
     </style>
 </head>
 <body>
@@ -50,15 +48,22 @@
     </div>
 
     <div class="sidebar">
-        <div class="card" id="coach-feedback">
+        <div class="card">
             <p id="hint-msg" style="margin:0; font-size: 0.9em; color: #bababa;">教练：点击棋子开始对局。</p>
         </div>
-        <div style="display: flex; gap: 10px;">
+        
+        <div style="margin-bottom: 5px;">
+            <label style="font-size: 0.8em; color: #888;">AI 难度</label>
             <select id="ai-depth">
                 <option value="2">新手</option>
                 <option value="3" selected>进阶</option>
+                <option value="4">挑战</option>
             </select>
-            <button onclick="location.reload()">重新开始</button>
+        </div>
+
+        <div class="btn-group">
+            <button class="btn-undo" onclick="undoMove()">悔棋 ↩</button>
+            <button class="btn-reset" onclick="location.reload()">重新开始</button>
         </div>
     </div>
 </div>
@@ -85,7 +90,6 @@
         return total;
     }
 
-    // AI 核心逻辑保持不变，确保算力稳定
     function minimax(g, depth, alpha, beta, isMaximizing) {
         if (depth === 0) return evaluateBoard(g);
         let moves = g.moves();
@@ -123,10 +127,21 @@
         }));
     }
 
+    function undoMove() {
+        // 撤销两步：AI的一步和你的一步
+        game.undo();
+        game.undo();
+        selected = null;
+        draw();
+        updateUI(evaluateBoard(game));
+        document.getElementById('status-title').innerText = "你的回合";
+        document.getElementById('hint-msg').innerText = "教练：已撤销到你的上一次走子。";
+    }
+
     function handleInput(clientX, clientY) {
         if (game.turn() === 'b') return;
         const rect = canvas.getBoundingClientRect();
-        const scale = 560 / rect.width; // 处理 CSS 缩放后的坐标转换
+        const scale = 560 / rect.width;
         const c = Math.floor(((clientX - rect.left) * scale) / size);
         const r = Math.floor(((clientY - rect.top) * scale) / size);
         const sq = String.fromCharCode(97 + c) + (8 - r);
@@ -157,8 +172,8 @@
         
         const diff = currentEval - prevEval;
         const hintEl = document.getElementById('hint-msg');
-        if (diff < -50) hintEl.innerHTML = '教练：这一步太冒险了！<span class="move-grade grade-bad">失误</span>';
-        else if (diff > 20) hintEl.innerHTML = '教练：走得漂亮！<span class="move-grade grade-best">精妙</span>';
+        if (diff < -50) hintEl.innerHTML = '教练：糟了！<span class="move-grade grade-bad">大失误</span>';
+        else if (diff > 20) hintEl.innerHTML = '教练：漂亮！<span class="move-grade grade-best">精妙</span>';
         else hintEl.innerHTML = '教练：局面平稳，继续保持。';
     }
 
@@ -168,7 +183,7 @@
         if (moves.length === 0) { document.getElementById('status-title').innerText = "游戏结束"; return; }
 
         const prevEval = evaluateBoard(game);
-        let bestMove = moves[Math.floor(Math.random() * moves.length)];
+        let bestMove = moves[0];
         let bestValue = 9999;
 
         for (let m of moves) {
@@ -184,16 +199,8 @@
         document.getElementById('status-title').innerText = "你的回合";
     }
 
-    // 同时监听鼠标和触屏
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        const touch = e.touches[0];
-        handleInput(touch.clientX, touch.clientY);
-    }, {passive: false});
-
-    canvas.addEventListener('mousedown', (e) => {
-        handleInput(e.clientX, e.clientY);
-    });
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(e.touches[0].clientX, e.touches[0].clientY); }, {passive: false});
+    canvas.addEventListener('mousedown', (e) => { handleInput(e.clientX, e.clientY); });
 
     draw();
 </script>
