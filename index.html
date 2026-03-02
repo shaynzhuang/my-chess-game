@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI 国际象棋教练 - 完整版</title>
+    <title>AI 国际象棋教练 - Pro</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <style>
-        :root { --bg: #262421; --accent: #81b64c; --panel: #312e2b; --danger: #fa412d; }
+        :root { --bg: #262421; --accent: #81b64c; --panel: #312e2b; --danger: #fa412d; --hint: #3182ce; }
         body { background: var(--bg); color: #fff; font-family: sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow-x: hidden; }
         
         .container { display: flex; flex-direction: column; width: 100%; max-width: 600px; padding: 10px; box-sizing: border-box; align-items: center; gap: 15px; }
@@ -52,19 +52,15 @@
             <p id="hint-msg" style="margin:0; font-size: 0.9em; color: #bababa;">教练：点击棋子开始对局。</p>
         </div>
         
-        <div style="margin-bottom: 5px;">
-            <label style="font-size: 0.8em; color: #888;">AI 难度</label>
+        <div style="display: flex; gap: 10px;">
             <select id="ai-depth">
                 <option value="2">新手</option>
                 <option value="3" selected>进阶</option>
                 <option value="4">挑战</option>
             </select>
-        </div>
-
-        <div class="btn-group">
             <button class="btn-undo" onclick="undoMove()">悔棋 ↩</button>
-            <button class="btn-reset" onclick="location.reload()">重新开始</button>
         </div>
+        <button class="btn-reset" onclick="location.reload()">重新开始</button>
     </div>
 </div>
 
@@ -74,6 +70,7 @@
     const game = new Chess();
     const size = 560 / 8;
     let selected = null;
+    let hintMove = null;
 
     const pieceSymbols = {
         'wp': '♙', 'wr': '♖', 'wn': '♘', 'wb': '♗', 'wq': '♕', 'wk': '♔',
@@ -104,6 +101,20 @@
         }
     }
 
+    function getBestMove(g, depth) {
+        let moves = g.moves({verbose: true});
+        let bestMove = moves[0];
+        let bestValue = -9999; // 白方最大化分值
+
+        for (let m of moves) {
+            g.move(m);
+            let val = minimax(g, depth - 1, -10000, 10000, false);
+            g.undo();
+            if (val > bestValue) { bestValue = val; bestMove = m; }
+        }
+        return bestMove;
+    }
+
     function draw() {
         ctx.clearRect(0,0,560,560);
         for (let r = 0; r < 8; r++) {
@@ -116,6 +127,12 @@
                 }
             }
         }
+        
+        // 绘制提示箭头
+        if (hintMove) {
+            drawArrow(hintMove.from, hintMove.to);
+        }
+
         ctx.font = `${size * 0.8}px Arial`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         game.board().forEach((row, r) => row.forEach((p, c) => {
@@ -127,15 +144,44 @@
         }));
     }
 
+    function drawArrow(from, to) {
+        const fromC = from.charCodeAt(0) - 97;
+        const fromR = 8 - parseInt(from.substring(1));
+        const toC = to.charCodeAt(0) - 97;
+        const toR = 8 - parseInt(to.substring(1));
+
+        const x1 = fromC * size + size / 2;
+        const y1 = fromR * size + size / 2;
+        const x2 = toC * size + size / 2;
+        const y2 = toR * size + size / 2;
+
+        ctx.strokeStyle = '#3182ce';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // 箭头箭头
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - 15 * Math.cos(angle - Math.PI / 6), y2 - 15 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(x2 - 15 * Math.cos(angle + Math.PI / 6), y2 - 15 * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fillStyle = '#3182ce';
+        ctx.fill();
+    }
+
     function undoMove() {
-        // 撤销两步：AI的一步和你的一步
         game.undo();
         game.undo();
         selected = null;
+        hintMove = null;
         draw();
         updateUI(evaluateBoard(game));
         document.getElementById('status-title').innerText = "你的回合";
-        document.getElementById('hint-msg').innerText = "教练：已撤销到你的上一次走子。";
+        document.getElementById('hint-msg').innerText = "教练：已撤销。";
     }
 
     function handleInput(clientX, clientY) {
@@ -150,7 +196,9 @@
             const prevEval = evaluateBoard(game);
             const move = game.move({ from: selected.id, to: sq, promotion: 'q' });
             if (move) {
-                selected = null; draw();
+                selected = null;
+                hintMove = null; // 清除提示
+                draw();
                 updateUI(prevEval);
                 document.getElementById('status-title').innerText = "AI 思考中...";
                 setTimeout(aiTurn, 300);
@@ -197,6 +245,13 @@
         draw();
         updateUI(prevEval);
         document.getElementById('status-title').innerText = "你的回合";
+        
+        // AI 走完后，教练提示下一步
+        if (game.turn() === 'w') {
+            const bestHint = getBestMove(game, 2); // 教练低深度提示
+            hintMove = bestHint;
+            draw();
+        }
     }
 
     canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(e.touches[0].clientX, e.touches[0].clientY); }, {passive: false});
