@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 国际象棋教练 - 手机版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <style>
+        :root { --bg: #262421; --accent: #81b64c; --panel: #312e2b; }
+        body { background: var(--bg); color: #fff; font-family: sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow-x: hidden; }
+        
+        /* 响应式容器 */
+        .container { display: flex; flex-direction: column; width: 100%; max-width: 600px; padding: 10px; box-sizing: border-box; align-items: center; gap: 15px; }
+        
+        @media (min-width: 800px) {
+            .container { flex-direction: row; max-width: 900px; padding: 25px; }
+        }
+
+        .board-wrapper { position: relative; display: flex; gap: 10px; }
+        
+        .eval-bar-box { width: 12px; height: 100%; background: #403d39; border-radius: 2px; position: relative; overflow: hidden; }
+        #eval-progress { position: absolute; bottom: 0; width: 100%; height: 50%; background: #fff; transition: height 0.8s ease; }
+
+        canvas { background: #779556; border-radius: 4px; box-shadow: 0 5px 25px rgba(0,0,0,0.5); touch-action: none; max-width: 90vw; height: auto !important; }
+
+        .sidebar { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+        .card { background: var(--panel); padding: 12px; border-radius: 8px; border-left: 4px solid var(--accent); }
+        
+        .move-grade { font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+        .grade-best { background: #81b64c; color: white; }
+        .grade-bad { background: #fa412d; color: white; }
+
+        select, button { width: 100%; padding: 14px; border: none; border-radius: 8px; background: #45423e; color: white; cursor: pointer; font-weight: bold; font-size: 16px; }
+        button:active { background: var(--accent); transform: scale(0.98); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="sidebar">
+        <div class="card" style="display:flex; justify-content: space-between; align-items: center;">
+            <h3 id="status-title" style="margin:0; font-size: 1.1em;">你的回合</h3>
+            <div id="eval-val" style="font-weight: bold; color: #81b64c;">+0.0</div>
+        </div>
+    </div>
+
+    <div class="board-wrapper">
+        <div class="eval-bar-box"><div id="eval-progress"></div></div>
+        <canvas id="board" width="560" height="560"></canvas>
+    </div>
+
+    <div class="sidebar">
+        <div class="card" id="coach-feedback">
+            <p id="hint-msg" style="margin:0; font-size: 0.9em; color: #bababa;">教练：点击棋子开始对局。</p>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <select id="ai-depth">
+                <option value="2">新手</option>
+                <option value="3" selected>进阶</option>
+            </select>
+            <button onclick="location.reload()">重新开始</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const game = new Chess();
+    const size = 560 / 8;
+    let selected = null;
+
+    const pieceSymbols = {
+        'wp': '♙', 'wr': '♖', 'wn': '♘', 'wb': '♗', 'wq': '♕', 'wk': '♔',
+        'bp': '♟', 'br': '♜', 'bn': '♞', 'bb': '♝', 'bq': '♛', 'bk': '♚'
+    };
+
+    const weights = { p: 10, n: 30, b: 30, r: 50, q: 90, k: 900 };
+    
+    function evaluateBoard(g) {
+        let total = 0;
+        g.board().forEach(row => row.forEach(p => {
+            if(p) total += (p.color === 'w' ? weights[p.type] : -weights[p.type]);
+        }));
+        return total;
+    }
+
+    // AI 核心逻辑保持不变，确保算力稳定
+    function minimax(g, depth, alpha, beta, isMaximizing) {
+        if (depth === 0) return evaluateBoard(g);
+        let moves = g.moves();
+        if (isMaximizing) {
+            let best = -9999;
+            for (let m of moves) { g.move(m); best = Math.max(best, minimax(g, depth - 1, alpha, beta, !isMaximizing)); g.undo(); alpha = Math.max(alpha, best); if (beta <= alpha) break; }
+            return best;
+        } else {
+            let best = 9999;
+            for (let m of moves) { g.move(m); best = Math.min(best, minimax(g, depth - 1, alpha, beta, !isMaximizing)); g.undo(); beta = Math.min(beta, best); if (beta <= alpha) break; }
+            return best;
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0,0,560,560);
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                ctx.fillStyle = (r + c) % 2 === 0 ? '#ebecd0' : '#779556';
+                ctx.fillRect(c * size, r * size, size, size);
+                if (selected && selected.r === r && selected.c === c) {
+                    ctx.fillStyle = 'rgba(255, 255, 0, 0.4)';
+                    ctx.fillRect(c * size, r * size, size, size);
+                }
+            }
+        }
+        ctx.font = `${size * 0.8}px Arial`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        game.board().forEach((row, r) => row.forEach((p, c) => {
+            if (p) {
+                ctx.fillStyle = p.color === 'w' ? '#fff' : '#000';
+                if(p.color === 'w') { ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeText(pieceSymbols[p.color+p.type], c*size+size/2, r*size+size/2); }
+                ctx.fillText(pieceSymbols[p.color+p.type], c*size+size/2, r*size+size/2);
+            }
+        }));
+    }
+
+    function handleInput(clientX, clientY) {
+        if (game.turn() === 'b') return;
+        const rect = canvas.getBoundingClientRect();
+        const scale = 560 / rect.width; // 处理 CSS 缩放后的坐标转换
+        const c = Math.floor(((clientX - rect.left) * scale) / size);
+        const r = Math.floor(((clientY - rect.top) * scale) / size);
+        const sq = String.fromCharCode(97 + c) + (8 - r);
+
+        if (selected) {
+            const prevEval = evaluateBoard(game);
+            const move = game.move({ from: selected.id, to: sq, promotion: 'q' });
+            if (move) {
+                selected = null; draw();
+                updateUI(prevEval);
+                document.getElementById('status-title').innerText = "AI 思考中...";
+                setTimeout(aiTurn, 300);
+            } else {
+                const p = game.get(sq);
+                if (p && p.color === 'w') { selected = { id: sq, r, c }; draw(); }
+            }
+        } else {
+            const p = game.get(sq);
+            if (p && p.color === 'w') { selected = { id: sq, r, c }; draw(); }
+        }
+    }
+
+    function updateUI(prevEval) {
+        const currentEval = evaluateBoard(game);
+        const score = currentEval / 10;
+        document.getElementById('eval-val').innerText = (score > 0 ? '+' : '') + score.toFixed(1);
+        document.getElementById('eval-progress').style.height = Math.max(0, Math.min(100, 50 + score * 4)) + '%';
+        
+        const diff = currentEval - prevEval;
+        const hintEl = document.getElementById('hint-msg');
+        if (diff < -50) hintEl.innerHTML = '教练：这一步太冒险了！<span class="move-grade grade-bad">失误</span>';
+        else if (diff > 20) hintEl.innerHTML = '教练：走得漂亮！<span class="move-grade grade-best">精妙</span>';
+        else hintEl.innerHTML = '教练：局面平稳，继续保持。';
+    }
+
+    function aiTurn() {
+        const depth = parseInt(document.getElementById('ai-depth').value);
+        let moves = game.moves();
+        if (moves.length === 0) { document.getElementById('status-title').innerText = "游戏结束"; return; }
+
+        const prevEval = evaluateBoard(game);
+        let bestMove = moves[Math.floor(Math.random() * moves.length)];
+        let bestValue = 9999;
+
+        for (let m of moves) {
+            game.move(m);
+            let val = minimax(game, depth - 1, -10000, 10000, true);
+            game.undo();
+            if (val <= bestValue) { bestValue = val; bestMove = m; }
+        }
+
+        game.move(bestMove);
+        draw();
+        updateUI(prevEval);
+        document.getElementById('status-title').innerText = "你的回合";
+    }
+
+    // 同时监听鼠标和触屏
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        handleInput(touch.clientX, touch.clientY);
+    }, {passive: false});
+
+    canvas.addEventListener('mousedown', (e) => {
+        handleInput(e.clientX, e.clientY);
+    });
+
+    draw();
+</script>
+</body>
+</html>
